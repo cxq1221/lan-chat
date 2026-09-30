@@ -44,7 +44,8 @@
       ],
       "icon": "desktop/icon.png",
       "category": "public.app-category.social-networking",
-      "identity": null
+      "identity": "-",
+      "hardenedRuntime": false
     },
     "win": {
       "target": [
