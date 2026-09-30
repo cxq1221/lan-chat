@@ -1,0 +1,7 @@
+data/
+node_modules/
+launchagent.plist
+.env
+.env.*
+*.log
+*.pem

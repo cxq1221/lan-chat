@@ -1,0 +1,5 @@
+{
+  "name": "lan-chat", "version": "1.0.0", "private": true,
+  "type": "module", "engines": {"node": ">=22.13"},
+  "scripts": {"start": "node server.mjs", "dev": "NODE_ENV=development node --watch --watch-path=server.mjs --watch-path=public server.mjs", "test": "node --test test.mjs"}
+}
