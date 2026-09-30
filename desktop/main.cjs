@@ -30,14 +30,14 @@ else {
     });
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     win.on('close', event => { if (!quitting) { event.preventDefault(); win.hide(); } });
-    await win.loadURL(`http://localhost:${service.port}/`);
+    await win.loadURL(chatURL());
     const icon = nativeImage.createFromPath(path.join(__dirname, 'icon.png')).resize({ width: 22, height: 22 });
     tray = new Tray(icon); tray.setToolTip('同频 · 局域网群聊');
     const addressItems = state().addresses.map(address => ({ label: address, click: () => clipboard.writeText(address) }));
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: '显示聊天室', click: showWindow },
       { label: '复制局域网地址', submenu: addressItems.length ? addressItems : [{ label: '尚未检测到局域网地址', enabled: false }] },
-      { label: '在浏览器中打开', click: () => service && shell.openExternal(`http://localhost:${service.port}`) },
+      { label: '在浏览器中打开', click: () => service && shell.openExternal(chatURL()) },
       { type: 'separator' }, { label: '退出并停止服务', click: () => app.quit() }
     ]));
     tray.on('click', showWindow);
@@ -58,6 +58,11 @@ function state() {
     if (net.family === 'IPv4' && !net.internal) addresses.push(`http://${net.address}:${service.port}`);
   }
   return { running: !!service, error: failure, addresses: [...new Set(addresses)], port: service?.port, dataDir: path.join(app.getPath('userData'), 'server-data') };
+}
+function chatURL() {
+  const url = new URL(`http://localhost:${service.port}/`);
+  for (const address of state().addresses) url.searchParams.append('lan', address);
+  return url.href;
 }
 app.on('activate', showWindow);
 app.on('window-all-closed', () => {});

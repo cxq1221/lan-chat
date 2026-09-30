@@ -5,6 +5,21 @@ let upload;
 const messages = new Map();
 const timeline = $('timeline');
 const input = $('input');
+const desktopAddresses = new URLSearchParams(location.search).getAll('lan');
+if (desktopAddresses.length) {
+  $('desktop-access').hidden = false;
+  $('desktop-address-list').replaceChildren(...desktopAddresses.map(address => {
+    const row = document.createElement('div'); row.className = 'desktop-address-row';
+    const value = document.createElement('code'); value.textContent = address;
+    const copy = document.createElement('button'); copy.type = 'button'; copy.textContent = '复制';
+    copy.onclick = async () => {
+      try { await navigator.clipboard.writeText(address); copy.textContent = '已复制'; }
+      catch { copy.textContent = '复制失败'; }
+      setTimeout(() => { copy.textContent = '复制'; }, 1500);
+    };
+    row.append(value, copy); return row;
+  }));
+}
 try { input.value = sessionStorage.getItem('lan-chat-dev-draft') || ''; sessionStorage.removeItem('lan-chat-dev-draft'); } catch {}
 const colors = new Set(['blue','green','amber','rose','violet','teal']);
 async function api(path, options) {
