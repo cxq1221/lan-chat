@@ -66,4 +66,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" packages/* --repo "$GITHUB_REPOSITORY" --title "同频 $GITHUB_REF_NAME" --notes "Windows 与 macOS 桌面服务端。双击启动，浏览器访问即可聊天和分享文件。安装包未配置商业签名或 Apple 公证，系统可能提示来源未验证。"
+          gh release create "$GITHUB_REF_NAME" packages/* --repo "$GITHUB_REPOSITORY" --title "同频 $GITHUB_REF_NAME" --notes "Windows 与 macOS 桌面群聊。双击启动后可直接在应用内聊天、上传和下载文件，局域网其他设备也可用浏览器访问。安装包未配置商业签名或 Apple 公证，系统可能提示来源未验证。"

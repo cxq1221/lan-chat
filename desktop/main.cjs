@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, clipboard, shell } = require('electron');
+const { app, BrowserWindow, Tray, Menu, nativeImage, clipboard, shell, dialog } = require('electron');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { networkInterfaces } = require('node:os');
@@ -15,23 +15,32 @@ else {
       catch (error) { console.error(error); app.exit(1); }
       return;
     }
+    await start();
+    if (!service) {
+      dialog.showErrorBox('同频启动失败', failure || '无法启动聊天服务');
+      app.quit();
+      return;
+    }
     Menu.setApplicationMenu(null);
-    win = new BrowserWindow({ width: 660, height: 620, minWidth: 560, minHeight: 520,
-      title: '同频 · 局域网服务', backgroundColor: '#f3f6ef',
-      webPreferences: { preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true } });
-    win.webContents.on('will-navigate', event => event.preventDefault());
+    win = new BrowserWindow({ width: 1120, height: 780, minWidth: 680, minHeight: 560,
+      title: '同频 · 公共聊天室', backgroundColor: '#f3f6ef',
+      webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true } });
+    win.webContents.on('will-navigate', (event, url) => {
+      if (new URL(url).origin !== `http://localhost:${service.port}`) event.preventDefault();
+    });
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     win.on('close', event => { if (!quitting) { event.preventDefault(); win.hide(); } });
-    await win.loadFile(path.join(__dirname, 'index.html'));
+    await win.loadURL(`http://localhost:${service.port}/`);
     const icon = nativeImage.createFromPath(path.join(__dirname, 'icon.png')).resize({ width: 22, height: 22 });
     tray = new Tray(icon); tray.setToolTip('同频 · 局域网群聊');
+    const addressItems = state().addresses.map(address => ({ label: address, click: () => clipboard.writeText(address) }));
     tray.setContextMenu(Menu.buildFromTemplate([
-      { label: '显示服务窗口', click: showWindow },
-      { label: '打开聊天室', click: () => service && shell.openExternal(`http://localhost:${service.port}`) },
+      { label: '显示聊天室', click: showWindow },
+      { label: '复制局域网地址', submenu: addressItems.length ? addressItems : [{ label: '尚未检测到局域网地址', enabled: false }] },
+      { label: '在浏览器中打开', click: () => service && shell.openExternal(`http://localhost:${service.port}`) },
       { type: 'separator' }, { label: '退出并停止服务', click: () => app.quit() }
     ]));
     tray.on('click', showWindow);
-    await start();
   }).catch(error => { console.error(error); app.exit(1); });
 }
 
@@ -50,12 +59,6 @@ function state() {
   }
   return { running: !!service, error: failure, addresses: [...new Set(addresses)], port: service?.port, dataDir: path.join(app.getPath('userData'), 'server-data') };
 }
-function allow(event) { if (!win || event.sender !== win.webContents) throw new Error('未知窗口'); }
-ipcMain.handle('state', event => { allow(event); return state(); });
-ipcMain.handle('copy', (event, address) => { allow(event); if (!state().addresses.includes(address)) throw new Error('无效地址'); clipboard.writeText(address); });
-ipcMain.handle('open-chat', event => { allow(event); if (service) return shell.openExternal(`http://localhost:${service.port}`); });
-ipcMain.handle('open-data', event => { allow(event); return shell.openPath(state().dataDir); });
-ipcMain.handle('quit', event => { allow(event); app.quit(); });
 app.on('activate', showWindow);
 app.on('window-all-closed', () => {});
 app.on('before-quit', event => {
