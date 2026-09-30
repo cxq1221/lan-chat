@@ -4,12 +4,13 @@ import { randomUUID } from 'node:crypto';
 import { createReadStream, mkdirSync, readFileSync, readdirSync, unlinkSync } from 'node:fs';
 import { open, rename, rm } from 'node:fs/promises';
 import { networkInterfaces } from 'node:os';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { join, dirname } from 'node:path';
 
 const root = dirname(fileURLToPath(import.meta.url));
+export async function startChatServer(options = {}) {
 const devVersion = process.env.NODE_ENV === 'development' ? randomUUID() : null;
-const dir = process.env.DATA_DIR || join(root, 'data');
+const dir = options.dataDir || process.env.DATA_DIR || join(root, 'data');
 mkdirSync(dir, { recursive: true });
 const fileDir = join(dir, 'files');
 mkdirSync(fileDir, { recursive: true });
@@ -166,10 +167,44 @@ const server = http.createServer(async (req, res) => {
     json(res, 404, { error: '没有找到这个页面' });
   } catch (error) { if (!res.headersSent) json(res, 400, { error: '请求未完成，请稍后重试' }); else res.end(); console.error(error.message); }
 });
-server.listen(Number(process.env.PORT || 81), '0.0.0.0', () => {
-  const port = server.address().port;
-  console.log(`群聊已启动：http://localhost:${port}`);
-  for (const list of Object.values(networkInterfaces())) for (const net of list || []) if (net.family === 'IPv4' && !net.internal) console.log(`局域网地址：http://${net.address}:${port}`);
-});
-function shutdown() { clearInterval(cleanup); for (const res of streams.keys()) res.end(); server.close(() => { db.close(); process.exit(0); }); }
-process.on('SIGTERM', shutdown); process.on('SIGINT', shutdown);
+const requestedPort = options.port ?? Number(process.env.PORT || 81);
+const candidates = options.fallback ? [...new Set([requestedPort, 8787, 0])] : [requestedPort];
+try {
+  for (let index = 0; index < candidates.length; index++) {
+    try {
+      await new Promise((resolve, reject) => {
+        const failed = error => { server.off('listening', ready); reject(error); };
+        const ready = () => { server.off('error', failed); resolve(); };
+        server.once('error', failed); server.once('listening', ready);
+        server.listen(candidates[index], '0.0.0.0');
+      });
+      break;
+    } catch (error) {
+      if (!['EADDRINUSE', 'EACCES'].includes(error.code) || index === candidates.length - 1) throw error;
+    }
+  }
+} catch (error) { clearInterval(cleanup); db.close(); throw error; }
+const port = server.address().port;
+console.log(`群聊已启动：http://localhost:${port}`);
+for (const list of Object.values(networkInterfaces())) for (const net of list || []) if (net.family === 'IPv4' && !net.internal) console.log(`局域网地址：http://${net.address}:${port}`);
+let closing;
+return {
+  port,
+  close() {
+    if (closing) return closing;
+    clearInterval(cleanup);
+    for (const res of streams.keys()) res.end();
+    closing = new Promise(resolve => {
+      const timer = setTimeout(() => server.closeAllConnections(), 5000);
+      server.close(() => { clearTimeout(timer); db.close(); resolve(); });
+    });
+    return closing;
+  }
+};
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const service = await startChatServer();
+  const shutdown = async () => { await service.close(); process.exit(0); };
+  process.on('SIGTERM', shutdown); process.on('SIGINT', shutdown);
+}

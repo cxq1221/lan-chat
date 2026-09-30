@@ -1,0 +1,11 @@
+const { spawn } = require('node:child_process');
+const executable = process.argv[2] || require('electron');
+const args = process.argv[2] ? ['--smoke-test'] : ['.', '--smoke-test'];
+const env = {...process.env}; delete env.ELECTRON_RUN_AS_NODE;
+const child = spawn(executable,args,{env,stdio:['ignore','pipe','pipe']});
+let output = '';
+child.stdout.on('data', chunk => { output+=chunk; process.stdout.write(chunk); });
+child.stderr.on('data', chunk => process.stderr.write(chunk));
+const timer = setTimeout(()=>{child.kill();process.exit(1);},60000);
+child.on('error', error=>{console.error(error);clearTimeout(timer);process.exit(1);});
+child.on('exit', code=>{clearTimeout(timer);process.exit(code===0 && output.includes('DESKTOP_SMOKE_OK') ? 0 : 1);});

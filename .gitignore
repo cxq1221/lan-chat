@@ -5,3 +5,5 @@ launchagent.plist
 .env.*
 *.log
 *.pem
+dist/
+.DS_Store

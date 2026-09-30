@@ -10,6 +10,22 @@
 - SQLite 保存最近 7 天的消息和文件。首次加载最近 100 条，可继续加载更早内容。
 - 适配电脑和手机。前端资源由本机提供，运行时不依赖互联网。
 
+## 桌面版：双击启动
+
+在 [GitHub Releases](https://github.com/cxq1221/lan-chat/releases) 下载对应安装包：
+
+| 系统 | 安装包 |
+| --- | --- |
+| Windows x64 | `windows-x64-setup.exe` 安装版，或 `windows-x64-portable.exe` 便携版 |
+| Mac Apple Silicon（M 系列） | `mac-arm64.dmg` |
+| Mac Intel | `mac-x64.dmg` |
+
+双击启动后窗口显示局域网地址，可复制给其他设备。关闭窗口后服务继续在系统托盘/菜单栏运行；选择“退出并停止服务”才会停止。服务优先使用 81 端口，被占用或无权限时自动尝试 8787 和系统分配的可用端口，实际地址以窗口为准。
+
+桌面版内置运行环境，无需安装 Node.js。数据存放在系统应用数据目录下的 `server-data/`，点击“查看数据目录”可打开；更新应用不会覆盖该目录。桌面版的数据独立于源码运行的 `data/`。同一台主机同时运行两种方式时，会形成两个独立聊天室。
+
+当前安装包没有开发者商业签名或 Apple 公证，下载后系统可能显示来源未验证提示。Windows 首次启动时如果防火墙询问网络权限，需要允许在用于聊天的私有网络接收入站连接。
+
 ## 本机运行
 
 需要 Node.js 22.13 或更新版本，无第三方依赖。
@@ -46,3 +62,16 @@ npm test
 单条文字消息最多 4000 字符。消息和文件每分钟清理一次；超过 7 天的内容即使清理尚未执行，也不会在查询或下载接口返回。文件上传按实际接收大小再次校验，下载统一使用附件响应，不在页面中执行文件内容。主机需要为上传文件预留磁盘空间。
 
 代码使用 [MIT 许可证](LICENSE)。
+
+## 构建桌面安装包
+
+```sh
+npm ci
+npm run desktop
+npm run desktop:smoke
+npm run dist:mac -- --arm64  # Apple Silicon Mac
+npm run dist:mac -- --x64    # Intel Mac
+npm run dist:win            # Windows x64
+```
+
+产物保存在 `dist/`。建议在对应系统构建。GitHub Actions 会在 `v*` 标签推送后分别在 Windows、Apple Silicon Mac 和 Intel Mac 上运行测试、构建安装包并上传到 Release；也可以手动运行 Desktop apps 工作流生成构建产物。发布前如需签名，应配置自己的开发者证书并调整构建签名设置。

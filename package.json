@@ -1,5 +1,75 @@
 {
-  "name": "lan-chat", "version": "1.0.0", "private": true,
-  "type": "module", "engines": {"node": ">=22.13"},
-  "scripts": {"start": "node server.mjs", "dev": "NODE_ENV=development node --watch --watch-path=server.mjs --watch-path=public server.mjs", "test": "node --test test.mjs"}
+  "name": "lan-chat",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "NODE_ENV=development node --watch --watch-path=server.mjs --watch-path=public server.mjs",
+    "test": "node --test test.mjs",
+    "desktop": "electron .",
+    "desktop:smoke": "node desktop/check.cjs",
+    "dist:mac": "electron-builder --mac --publish never",
+    "dist:win": "electron-builder --win --publish never"
+  },
+  "devDependencies": {
+    "electron": "44.5.0",
+    "electron-builder": "26.15.3"
+  },
+  "main": "desktop/main.cjs",
+  "description": "无需登录的局域网聊天与文件分享服务",
+  "author": "cxq1221",
+  "license": "MIT",
+  "build": {
+    "appId": "io.github.cxq1221.lanchat",
+    "productName": "同频",
+    "artifactName": "LanChat-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "desktop/**",
+      "server.mjs",
+      "public/**",
+      "package.json",
+      "LICENSE"
+    ],
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "desktop/icon.png",
+      "category": "public.app-category.social-networking",
+      "identity": null
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "desktop/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "LanChat-${version}-windows-${arch}-setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "LanChat-${version}-windows-${arch}-portable.${ext}"
+    }
+  }
 }
