@@ -1,7 +1,7 @@
 const { app, BrowserWindow, Tray, Menu, nativeImage, clipboard, shell, dialog } = require('electron');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { networkInterfaces } = require('node:os');
+const { homedir, networkInterfaces } = require('node:os');
 
 const smoke = process.argv.includes('--smoke-test');
 let win, tray, service, quitting = false, failure = '';
@@ -48,7 +48,8 @@ function showWindow() { if (win) { if (win.isMinimized()) win.restore(); win.sho
 async function start() {
   try {
     const { startChatServer } = await import(pathToFileURL(path.join(__dirname, '..', 'server.mjs')).href);
-    service = await startChatServer({ port: 81, fallback: true, dataDir: path.join(app.getPath('userData'), 'server-data') });
+    service = await startChatServer({ port: 81, fallback: true, dataDir: path.join(app.getPath('userData'), 'server-data'),
+      saveDir: process.env.SAVE_DIR || path.join(homedir(), 'Pictures', '手机传图') });
     failure = '';
   } catch (error) { failure = '服务启动失败：' + error.message; }
 }
@@ -57,7 +58,8 @@ function state() {
   if (service) for (const nets of Object.values(networkInterfaces())) for (const net of nets || []) {
     if (net.family === 'IPv4' && !net.internal) addresses.push(`http://${net.address}:${service.port}`);
   }
-  return { running: !!service, error: failure, addresses: [...new Set(addresses)], port: service?.port, dataDir: path.join(app.getPath('userData'), 'server-data') };
+  return { running: !!service, error: failure, addresses: [...new Set(addresses)], port: service?.port,
+    dataDir: path.join(app.getPath('userData'), 'server-data'), saveDir: service?.saveDir };
 }
 function chatURL() {
   const url = new URL(`http://localhost:${service.port}/`);

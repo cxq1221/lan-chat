@@ -1,9 +1,9 @@
 import http from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
-import { createReadStream, mkdirSync, readFileSync, readdirSync, unlinkSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync } from 'node:fs';
 import { open, rename, rm } from 'node:fs/promises';
-import { networkInterfaces } from 'node:os';
+import { homedir, networkInterfaces } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { join, dirname } from 'node:path';
 
@@ -14,6 +14,11 @@ const dir = options.dataDir || process.env.DATA_DIR || join(root, 'data');
 mkdirSync(dir, { recursive: true });
 const fileDir = join(dir, 'files');
 mkdirSync(fileDir, { recursive: true });
+const saveDir = options.saveDir || process.env.SAVE_DIR
+  || (options.dataDir || process.env.DATA_DIR ? fileDir : join(homedir(), 'Pictures', '手机传图'));
+mkdirSync(saveDir, { recursive: true });
+const appOwnsFiles = saveDir === fileDir;
+const keepFiles = options.keepFiles ?? (process.env.KEEP_FILES === undefined ? !appOwnsFiles : process.env.KEEP_FILES !== '0');
 const maxFileBytes = 500_000_000;
 const db = new DatabaseSync(join(dir, 'chat.sqlite'));
 db.exec(`PRAGMA journal_mode=WAL;
@@ -24,18 +29,32 @@ const columns = new Set(db.prepare('PRAGMA table_info(messages)').all().map(row 
 if (!columns.has('fileId')) db.exec('ALTER TABLE messages ADD COLUMN fileId TEXT');
 if (!columns.has('fileName')) db.exec('ALTER TABLE messages ADD COLUMN fileName TEXT');
 if (!columns.has('fileSize')) db.exec('ALTER TABLE messages ADD COLUMN fileSize INTEGER');
+if (!columns.has('filePath')) db.exec('ALTER TABLE messages ADD COLUMN filePath TEXT');
 const retention = 7 * 86400_000;
 const clean = () => {
-  const expired = db.prepare('SELECT fileId FROM messages WHERE createdAt < ? AND fileId IS NOT NULL').all(Date.now() - retention);
-  db.prepare('DELETE FROM messages WHERE createdAt < ?').run(Date.now() - retention);
-  for (const {fileId} of expired) {
-    try { unlinkSync(join(fileDir, fileId)); } catch (error) { if (error.code !== 'ENOENT') console.error('文件清理失败', error); }
+  const cutoff = Date.now() - retention;
+  if (!keepFiles) {
+    const expired = db.prepare('SELECT fileId,filePath FROM messages WHERE createdAt < ? AND fileId IS NOT NULL').all(cutoff);
+    for (const {fileId, filePath} of expired) {
+      try { unlinkSync(filePath ? join(saveDir, filePath) : join(fileDir, fileId)); } catch (error) { if (error.code !== 'ENOENT') console.error('文件清理失败', error); }
+    }
   }
+  db.prepare('DELETE FROM messages WHERE createdAt < ?').run(cutoff);
 };
 clean();
 for (const name of readdirSync(fileDir)) {
   if (name.endsWith('.uploading') || (/^[a-f0-9-]{36}$/.test(name) && !db.prepare('SELECT 1 FROM messages WHERE fileId=?').get(name))) {
     try { unlinkSync(join(fileDir, name)); } catch (error) { console.error('残留文件清理失败', error); }
+  }
+}
+for (const entry of readdirSync(saveDir, { withFileTypes: true })) {
+  const folder = join(saveDir, entry.name);
+  if (!entry.isDirectory()) {
+    if (entry.name.endsWith('.uploading')) { try { unlinkSync(folder); } catch (error) { console.error('残留文件清理失败', error); } }
+    continue;
+  }
+  for (const name of readdirSync(folder)) {
+    if (name.endsWith('.uploading')) { try { unlinkSync(join(folder, name)); } catch (error) { console.error('残留文件清理失败', error); } }
   }
 }
 const cleanup = setInterval(clean, 60_000);
@@ -70,6 +89,23 @@ function fileName(raw) {
   } catch {}
   return null;
 }
+function dateFolder(ts) {
+  const date = new Date(ts), pad = value => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+function storageName(name) {
+  let value = String(name || '').replace(/[\\/\x00-\x1f\x7f:]/g, '_').replace(/^\.+/, '').trim();
+  if (!value || value === '.' || value === '..') value = '文件';
+  return value;
+}
+function uniqueName(folder, name) {
+  const dot = name.lastIndexOf('.');
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : '';
+  let candidate = name;
+  for (let n = 1; existsSync(join(folder, candidate)) && n < 1000; n++) candidate = `${stem}-${n}${ext}`;
+  return candidate;
+}
 function fileMessage(id) { return db.prepare(query + ' WHERE m.id=?').get(id); }
 async function body(req) {
   let chunks = []; let size = 0;
@@ -94,13 +130,14 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/me' && req.method === 'GET') return json(res, 200, identity(req, res));
     const download = /^\/api\/files\/([a-f0-9-]{36})$/.exec(url.pathname);
     if (download && req.method === 'GET') {
-      const row = db.prepare('SELECT fileName,fileSize FROM messages WHERE fileId=? AND createdAt>=?').get(download[1], Date.now() - retention);
+      const row = db.prepare('SELECT fileName,fileSize,filePath FROM messages WHERE fileId=? AND createdAt>=?').get(download[1], Date.now() - retention);
       if (!row) return json(res, 404, { error: '文件不存在或已过期' });
+      const source = row.filePath ? join(saveDir, row.filePath) : join(fileDir, download[1]);
       const safeAscii = row.fileName.replace(/[^\x20-\x7e]|["\\]/g, '_');
       res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': row.fileSize,
         'Content-Disposition': `attachment; filename="${safeAscii}"; filename*=UTF-8''${encodeURIComponent(row.fileName)}`,
         'X-Content-Type-Options': 'nosniff' });
-      const stream = createReadStream(join(fileDir, download[1]));
+      const stream = createReadStream(source);
       stream.on('error', error => { console.error('下载失败', error); res.destroy(error); });
       stream.pipe(res); return;
     }
@@ -138,8 +175,11 @@ const server = http.createServer(async (req, res) => {
       if (!Number.isSafeInteger(declared) || declared < 0) return json(res, 411, { error: '无法确定文件大小' });
       if (declared > maxFileBytes) return json(res, 413, { error: '文件不能超过 500 MB' });
       const user = identity(req, res);
-      const id = randomUUID(), temp = join(fileDir, id + '.uploading'), dest = join(fileDir, id);
-      let handle;
+      const id = randomUUID(), createdAt = Date.now(), day = dateFolder(createdAt);
+      const folder = join(saveDir, day);
+      mkdirSync(folder, { recursive: true });
+      const temp = join(folder, id + '.uploading');
+      let handle, dest = null;
       try {
         handle = await open(temp, 'wx');
         let size = 0;
@@ -150,15 +190,16 @@ const server = http.createServer(async (req, res) => {
         }
         if (size !== declared) throw new Error('文件上传未完成');
         await handle.close(); handle = null;
+        const stored = uniqueName(folder, storageName(name));
+        dest = join(folder, stored);
         await rename(temp, dest);
-        const createdAt = Date.now();
-        const result = db.prepare('INSERT INTO messages (userId,text,createdAt,fileId,fileName,fileSize) VALUES (?,?,?,?,?,?)').run(user.id, '', createdAt, id, name, size);
+        const result = db.prepare('INSERT INTO messages (userId,text,createdAt,fileId,fileName,fileSize,filePath) VALUES (?,?,?,?,?,?,?)').run(user.id, '', createdAt, id, name, size, join(day, stored));
         const message = fileMessage(Number(result.lastInsertRowid));
         broadcast('message', message); return json(res, 201, message);
       } catch (error) {
         if (handle) await handle.close();
         await rm(temp, { force: true });
-        await rm(dest, { force: true });
+        if (dest) await rm(dest, { force: true });
         console.error('上传失败', error);
         if (!res.headersSent) return json(res, error.message.includes('大小') ? 413 : 400, { error: error.message.includes('大小') ? '文件不能超过 500 MB' : '上传失败，请重试' });
         return;
@@ -186,10 +227,13 @@ try {
 } catch (error) { clearInterval(cleanup); db.close(); throw error; }
 const port = server.address().port;
 console.log(`群聊已启动：http://localhost:${port}`);
+console.log(`文件保存目录：${saveDir}${keepFiles ? '（消息过期后保留文件）' : ''}`);
 for (const list of Object.values(networkInterfaces())) for (const net of list || []) if (net.family === 'IPv4' && !net.internal) console.log(`局域网地址：http://${net.address}:${port}`);
 let closing;
 return {
   port,
+  saveDir,
+  keepFiles,
   close() {
     if (closing) return closing;
     clearInterval(cleanup);

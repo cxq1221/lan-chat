@@ -76,7 +76,8 @@ async function start() {
     const details = document.createElement('div'); const name = document.createElement('strong'); name.textContent = me.name;
     const label = document.createElement('small'); label.textContent = '你的自动昵称'; details.append(name,label); $('identity').replaceChildren(avatar(me),details);
     input.disabled = false;
-    $('file-input').disabled = false; $('attach').disabled = false;
+    $('file-input').disabled = false; $('image-input').disabled = false;
+    $('attach').disabled = false; $('image').disabled = false;
     source = new EventSource('/api/events');
     source.addEventListener('ready', async e => {
       const nextVersion = JSON.parse(e.data).devVersion;
@@ -112,27 +113,50 @@ $('composer').onsubmit=async e=>{
   finally{sending=false;resize();input.focus();}
 };
 $('attach').onclick = () => $('file-input').click();
-$('cancel-upload').onclick = () => upload?.abort();
-$('file-input').onchange = () => {
-  const file = $('file-input').files?.[0]; if (!file || upload) return;
-  $('file-input').value = '';
-  if (file.size > 500_000_000) { error('文件不能超过 500 MB'); return; }
-  if (new TextEncoder().encode(file.name).length > 255) { error('文件名太长'); return; }
-  error(); $('upload-progress').hidden = false; $('upload-label').textContent = `正在上传 ${file.name} · 0%`;
-  $('upload-meter').value = 0; $('attach').disabled = true;
-  const xhr = new XMLHttpRequest(); upload = xhr;
-  xhr.open('POST', '/api/files'); xhr.setRequestHeader('Content-Type', 'application/octet-stream');
-  xhr.setRequestHeader('X-File-Name', encodeURIComponent(file.name));
-  xhr.upload.onprogress = e => { if (e.lengthComputable) { const percent = Math.min(100, Math.round(e.loaded / e.total * 100)); $('upload-meter').value = percent; $('upload-label').textContent = `正在上传 ${file.name} · ${percent}%`; } };
-  xhr.onload = () => {
-    if (xhr.status === 201) { const m = JSON.parse(xhr.responseText); messages.set(m.id,m); render(); bottom(); }
-    else { try { error(JSON.parse(xhr.responseText).error || '上传失败，请重试'); } catch { error('上传失败，请重试'); } }
-  };
-  xhr.onerror = () => error('上传失败，请检查网络后重试');
-  xhr.onabort = () => error('上传已取消');
-  xhr.onloadend = () => { upload = null; $('upload-progress').hidden = true; $('attach').disabled = false; };
-  xhr.send(file);
-};
+$('image').onclick = () => $('image-input').click();
+let uploadCanceled = false;
+$('cancel-upload').onclick = () => { uploadCanceled = true; upload?.abort(); };
+function setAttachBusy(busy) { $('attach').disabled = busy; $('image').disabled = busy; }
+function uploadOne(file, label) {
+  return new Promise(resolve => {
+    error(); $('upload-progress').hidden = false;
+    $('upload-meter').value = 0; $('upload-label').textContent = `${label} · 0%`;
+    const xhr = new XMLHttpRequest(); upload = xhr;
+    xhr.open('POST', '/api/files'); xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    xhr.setRequestHeader('X-File-Name', encodeURIComponent(file.name));
+    xhr.upload.onprogress = e => { if (e.lengthComputable) { const percent = Math.min(100, Math.round(e.loaded / e.total * 100)); $('upload-meter').value = percent; $('upload-label').textContent = `${label} · ${percent}%`; } };
+    let ok = false;
+    xhr.onload = () => {
+      if (xhr.status === 201) { ok = true; try { const m = JSON.parse(xhr.responseText); messages.set(m.id,m); render(); bottom(); } catch {} }
+      else { try { error(JSON.parse(xhr.responseText).error || '上传失败，请重试'); } catch { error('上传失败，请重试'); } }
+    };
+    xhr.onerror = () => error('上传失败，请检查网络后重试');
+    xhr.onabort = () => error('上传已取消');
+    xhr.onloadend = () => resolve(ok);
+    xhr.send(file);
+  });
+}
+async function uploadFiles(fileList) {
+  const files = [...(fileList || [])];
+  if (!files.length || upload) return;
+  const tooBig = files.find(f => f.size > 500_000_000);
+  if (tooBig) { error(`「${tooBig.name}」超过 500 MB，单个文件不能大于 500 MB`); return; }
+  const tooLong = files.find(f => new TextEncoder().encode(f.name).length > 255);
+  if (tooLong) { error(`「${tooLong.name}」文件名太长`); return; }
+  uploadCanceled = false; setAttachBusy(true);
+  const failed = []; let done = 0;
+  for (let i = 0; i < files.length; i++) {
+    const label = files.length > 1 ? `正在上传 ${files[i].name}（${i + 1}/${files.length}）` : `正在上传 ${files[i].name}`;
+    if (await uploadOne(files[i], label)) done++; else failed.push(files[i].name);
+    if (uploadCanceled) break;
+  }
+  upload = null; $('upload-progress').hidden = true; setAttachBusy(false);
+  if (uploadCanceled) error(`上传已取消${done ? `，已完成 ${done} 个` : ''}`);
+  else if (failed.length) error(`${failed.length} 个文件上传失败：${failed.slice(0,3).join('、')}${failed.length > 3 ? ' 等' : ''}`);
+  else error();
+}
+$('file-input').onchange = () => { const files = [...($('file-input').files || [])]; $('file-input').value = ''; uploadFiles(files); };
+$('image-input').onchange = () => { const files = [...($('image-input').files || [])]; $('image-input').value = ''; uploadFiles(files); };
 $('new-messages').onclick=bottom;
 timeline.addEventListener('scroll',()=>{if(timeline.scrollHeight-timeline.scrollTop-timeline.clientHeight<90)$('new-messages').hidden=true;});
 window.addEventListener('pageshow',e=>{if(e.persisted)location.reload();});
